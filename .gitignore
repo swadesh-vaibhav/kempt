@@ -1,0 +1,88 @@
+# ---------------------------------------------------------------------------
+# Kempt — .gitignore (Android + Gradle, with Firebase / backend additions)
+# ---------------------------------------------------------------------------
+
+# Gradle
+.gradle/
+build/
+*/build/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+.gradletasknamecache
+
+# Local configuration (machine-specific, may contain SDK paths / keys)
+local.properties
+
+# Android build outputs
+*.apk
+*.aab
+*.ap_
+*.aar
+*.dex
+*.class
+bin/
+gen/
+out/
+release/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing / keystores — NEVER commit these
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Firebase — config and service-account credentials
+google-services.json
+GoogleService-Info.plist
+serviceAccountKey.json
+service-account*.json
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Secrets / environment
+.env
+.env.*
+*.env
+secrets.properties
+secrets.xml
+
+# Backend (Node / Cloud Functions), if used
+node_modules/
+npm-debug.log*
+yarn-error.log
+functions/node_modules/
+functions/.env
+dist/
+coverage/
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+
+# Kotlin
+.kotlin/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
+*.swp
+*~

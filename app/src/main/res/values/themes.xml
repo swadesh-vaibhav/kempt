@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Minimal launch theme; Compose (KemptTheme) drives the actual colours,
+         including light/dark and dynamic colour. -->
+    <style name="Theme.Kempt" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
