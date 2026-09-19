@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#F2101418"
+    android:padding="32dp">
+
+    <TextView
+        android:id="@+id/lock_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/overlay_title"
+        android:textColor="#FFFFFF"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/lock_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:text="@string/overlay_message"
+        android:textColor="#C8D2DC"
+        android:textSize="16sp" />
+
+    <EditText
+        android:id="@+id/lock_passcode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:autofillHints=""
+        android:hint="@string/overlay_passcode_hint"
+        android:textColorHint="#7A8794"
+        android:textColor="#FFFFFF"
+        android:inputType="numberPassword"
+        android:gravity="center"
+        android:textSize="20sp" />
+
+    <TextView
+        android:id="@+id/lock_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/overlay_wrong_passcode"
+        android:textColor="#FF6B6B"
+        android:textSize="14sp"
+        android:visibility="invisible" />
+
+    <Button
+        android:id="@+id/lock_unlock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="@string/overlay_unlock" />
+
+</LinearLayout>

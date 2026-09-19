@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Kempt</string>
+
+    <!-- Lock overlay -->
+    <string name="overlay_title">Blocked</string>
+    <string name="overlay_message">This app is locked. Enter the passcode from your accountability partner to unlock.</string>
+    <string name="overlay_passcode_hint">Partner passcode</string>
+    <string name="overlay_unlock">Unlock</string>
+    <string name="overlay_wrong_passcode">Wrong passcode. Your partner has been notified.</string>
 </resources>
