@@ -214,5 +214,10 @@ class AppMonitorService : Service() {
         fun start(context: Context) {
             context.startForegroundService(Intent(context, AppMonitorService::class.java))
         }
+
+        /** Stop the monitor (e.g. after an in-app disarm). Safe to call if it isn't running. */
+        fun stop(context: Context) {
+            context.stopService(Intent(context, AppMonitorService::class.java))
+        }
     }
 }

@@ -7,21 +7,29 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -40,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -47,6 +57,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.kempt.app.data.BlockEvent
 import com.kempt.app.ui.HomeUiState
 import com.kempt.app.ui.HomeViewModel
+import com.kempt.app.ui.InstalledApp
 import com.kempt.app.ui.theme.KemptTheme
 import com.kempt.app.util.Permissions
 import dagger.hilt.android.AndroidEntryPoint
@@ -75,6 +86,7 @@ private fun HomeRoute(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val installedApps by viewModel.installedApps.collectAsState()
     val context = LocalContext.current
 
     // Recompute the special-access permission state whenever we come back from Settings.
@@ -95,29 +107,45 @@ private fun HomeRoute(
         }
     }
 
-    HomeScreen(
-        state = state,
-        hasUsageAccess = hasUsageAccess,
-        hasOverlay = hasOverlay,
-        onRefreshPermissions = { permissionTick++ },
-        onSetPasscode = viewModel::setPasscode,
-        onAddApp = viewModel::addBlockedApp,
-        onRemoveApp = viewModel::removeBlockedApp,
-        onLockDown = viewModel::lockDown,
-        modifier = modifier
-    )
+    // Whether the full-screen app picker is open on top of the home screen.
+    var showAppPicker by remember { mutableStateOf(false) }
+    val blockedPackages = state.rules.map { it.packageName }.toSet()
+
+    if (showAppPicker) {
+        AppPickerScreen(
+            installedApps = installedApps,
+            blockedPackages = blockedPackages,
+            onToggleApp = viewModel::setAppBlocked,
+            onClose = { showAppPicker = false },
+            modifier = modifier
+        )
+    } else {
+        HomeScreen(
+            state = state,
+            selectedAppCount = blockedPackages.size,
+            hasUsageAccess = hasUsageAccess,
+            hasOverlay = hasOverlay,
+            onRefreshPermissions = { permissionTick++ },
+            onSetPasscode = viewModel::setPasscode,
+            onOpenAppPicker = { showAppPicker = true },
+            onLockDown = viewModel::lockDown,
+            onDisarm = viewModel::disarm,
+            modifier = modifier
+        )
+    }
 }
 
 @Composable
 private fun HomeScreen(
     state: HomeUiState,
+    selectedAppCount: Int,
     hasUsageAccess: Boolean,
     hasOverlay: Boolean,
     onRefreshPermissions: () -> Unit,
     onSetPasscode: (String) -> Unit,
-    onAddApp: (String) -> Unit,
-    onRemoveApp: (String) -> Unit,
+    onOpenAppPicker: () -> Unit,
     onLockDown: () -> Unit,
+    onDisarm: (String, (Boolean) -> Unit) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -135,7 +163,7 @@ private fun HomeScreen(
         )
 
         if (state.isArmed) {
-            LockedCard()
+            LockedCard(onDisarm = onDisarm)
         } else {
             PermissionsCard(
                 hasUsageAccess = hasUsageAccess,
@@ -153,9 +181,8 @@ private fun HomeScreen(
             )
             PasscodeCard(hasPasscode = state.hasPasscode, onSetPasscode = onSetPasscode)
             BlocklistCard(
-                packages = state.rules.map { it.packageName },
-                onAddApp = onAddApp,
-                onRemoveApp = onRemoveApp
+                selectedCount = selectedAppCount,
+                onOpenAppPicker = onOpenAppPicker
             )
             Button(
                 onClick = onLockDown,
@@ -176,14 +203,36 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun LockedCard() {
+private fun LockedCard(onDisarm: (String, (Boolean) -> Unit) -> Unit) {
+    var code by remember { mutableStateOf("") }
+    var showError by remember { mutableStateOf(false) }
     SectionCard("Locked") {
         Text(
-            "Your distracting apps are locked. Getting back in needs the passcode held by " +
-                "your accountability partner — enter it on the lock screen when a blocked " +
-                "app is opened.",
+            "Your distracting apps are locked. Enter the passcode held by your accountability " +
+                "partner to disarm.",
             style = MaterialTheme.typography.bodyMedium
         )
+        OutlinedTextField(
+            value = code,
+            onValueChange = { code = it; showError = false },
+            label = { Text("Partner passcode") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (showError) {
+            Text(
+                "Wrong passcode. Your partner has been notified.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+        Button(
+            onClick = { onDisarm(code) { success -> showError = !success; code = "" } },
+            enabled = code.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Enter code & disarm") }
     }
 }
 
@@ -255,49 +304,106 @@ private fun PasscodeCard(hasPasscode: Boolean, onSetPasscode: (String) -> Unit) 
 
 @Composable
 private fun BlocklistCard(
-    packages: List<String>,
-    onAddApp: (String) -> Unit,
-    onRemoveApp: (String) -> Unit
+    selectedCount: Int,
+    onOpenAppPicker: () -> Unit
 ) {
-    var pkg by remember { mutableStateOf("") }
     SectionCard("Blocked apps") {
-        OutlinedTextField(
-            value = pkg,
-            onValueChange = { pkg = it },
-            label = { Text("Package name (e.g. com.instagram.android)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+        Text(
+            text = when (selectedCount) {
+                0 -> "No apps selected yet."
+                1 -> "1 app selected."
+                else -> "$selectedCount apps selected."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Button(
-            onClick = { onAddApp(pkg); pkg = "" },
-            enabled = pkg.isNotBlank(),
+        OutlinedButton(
+            onClick = onOpenAppPicker,
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Add to blocklist") }
+        ) { Text("Select apps to block") }
+    }
+}
 
-        if (packages.isEmpty()) {
+/**
+ * Full-screen list of installed apps with a checkbox each. Shown on top of the home screen
+ * when the user taps "Select apps to block", and dismissed with Done or the system back
+ * button. As its own screen (not nested in the home's scroll) it can use a lazy list.
+ */
+@Composable
+private fun AppPickerScreen(
+    installedApps: List<InstalledApp>,
+    blockedPackages: Set<String>,
+    onToggleApp: (String, Boolean) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Route the hardware/gesture back action to closing the picker, not exiting the app.
+    BackHandler(onBack = onClose)
+    Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Select apps to block", style = MaterialTheme.typography.headlineSmall)
+            TextButton(onClick = onClose) { Text("Done") }
+        }
+        if (installedApps.isEmpty()) {
             Text(
-                "No apps blocked yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                "Loading installed apps…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp)
             )
         } else {
-            packages.forEach { name ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(240.dp)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                items(installedApps, key = { it.packageName }) { appInfo ->
+                    AppPickerRow(
+                        app = appInfo,
+                        checked = appInfo.packageName in blockedPackages,
+                        onToggleApp = onToggleApp
                     )
-                    TextButton(onClick = { onRemoveApp(name) }) { Text("Remove") }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AppPickerRow(
+    app: InstalledApp,
+    checked: Boolean,
+    onToggleApp: (String, Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggleApp(app.packageName, !checked) }
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(
+            bitmap = app.icon,
+            contentDescription = null,
+            modifier = Modifier.size(40.dp)
+        )
+        Text(
+            text = app.label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Checkbox(
+            checked = checked,
+            onCheckedChange = { isChecked -> onToggleApp(app.packageName, isChecked) }
+        )
     }
 }
 
