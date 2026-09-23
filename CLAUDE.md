@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Instructions
 
 - Always explain any code you write in great detail — walk through what each part does and why.
-- The user is new to Kotlin. Whenever explaining anything, keep this in mind: define Kotlin-specific syntax/concepts as they come up (e.g. `val`/`var`, null safety, data classes, coroutines, extension functions), and don't assume prior Kotlin familiarity.
+- The user is new to Kotlin. Whenever explaining anything, keep this in mind: define Kotlin-specific concepts as they come up (coroutines, extension functions, flows, etc.), and don't assume prior Kotlin familiarity.
 - Documentation in this repo uses **Doxygen-style** comments (`/** */` with `@file`, `@brief`, `@details`, `@param`, `@return`, `@note`, `@warning`, `@property`, `@code`/`@endcode`, and cross-refs via `@ref Fully.Qualified.Name` / `#member`) — **not** Kotlin-native KDoc. Match this style when adding or editing docs. Every existing source file follows it; keep it consistent.
 
 ## What Kempt is

@@ -52,11 +52,28 @@ class LockActivity : ComponentActivity() {
     @Inject lateinit var accountability: AccountabilityService
 
     /**
+     * @brief The blocked package that triggered this lock; recorded on the unlock events.
+     *
+     * @details @ref AppMonitorService passes it via the start intent (see #start) so the logged
+     * event names the exact app that was blocked — important on OEM builds where Settings is not
+     * @c com.android.settings. Falls back to #FALLBACK_PACKAGE if the intent somehow lacks it.
+     *
+     * @note @c var (not @c val) because it can be reassigned — here, when a re-launch arrives in
+     * #onNewIntent. A @c val in Kotlin is assign-once (like Java @c final); a @c var can change.
+     */
+    private var blockedPackage: String = FALLBACK_PACKAGE
+
+    /**
      * @brief Inflates the shared lock layout and wires the Unlock button.
      * @param savedInstanceState Unused; the lock has no state worth restoring.
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Read the package the monitor said tripped this lock. `?:` is Kotlin's Elvis operator:
+        // it yields the left side when non-null, otherwise the right — so a missing extra falls
+        // back to the AOSP Settings id rather than a null.
+        blockedPackage = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: FALLBACK_PACKAGE
 
         // Reuse the very same layout the overlay uses, so the two locks look identical.
         setContentView(R.layout.overlay_lock)
@@ -75,6 +92,24 @@ class LockActivity : ComponentActivity() {
             goHome()
             finish()
         }
+    }
+
+    /**
+     * @brief Adopts the package from a re-launch of this already-running lock.
+     *
+     * @details This Activity is declared @c launchMode="singleInstance" in the manifest, so when
+     * @ref start is called again while the instance is still alive, Android does *not* create a
+     * second instance or call #onCreate again — it delivers the new @c Intent here instead. We
+     * call @c setIntent so the @c intent property reflects the latest launch, then re-read the
+     * package. Without this, an unlock logged later could name the app from the first launch even
+     * though a different blocked app triggered the most recent one.
+     *
+     * @param intent The fresh start intent for this re-launch.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        blockedPackage = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: blockedPackage
     }
 
     /**
@@ -111,7 +146,7 @@ class LockActivity : ComponentActivity() {
      * @param type One of the @ref com.kempt.app.data.BlockEvent type constants.
      */
     private suspend fun recordAndReport(type: String) {
-        val event = BlockEvent(type = type, packageName = SETTINGS_TAG)
+        val event = BlockEvent(type = type, packageName = blockedPackage)
         val id = blockEventDao.insert(event)
         if (accountability.report(event.copy(id = id))) {
             blockEventDao.markSynced(listOf(id))
@@ -129,8 +164,15 @@ class LockActivity : ComponentActivity() {
 
     /** @brief Start helper and constants. */
     companion object {
-        /** @brief Recorded as the event's package, since this lock stands in for a blocked app. */
-        private const val SETTINGS_TAG = "com.android.settings"
+        /** @brief Intent-extra key carrying the package that triggered this lock (see #start). */
+        private const val EXTRA_BLOCKED_PACKAGE = "com.kempt.app.extra.BLOCKED_PACKAGE"
+
+        /**
+         * @brief Package recorded when the start intent lacks a real one — AOSP's canonical Settings id.
+         * @details Purely defensive: @ref AppMonitorService always supplies the actual package, so
+         * this fallback should not be hit in normal operation.
+         */
+        private const val FALLBACK_PACKAGE = "com.android.settings"
 
         /**
          * @brief Brings the full-screen lock to the foreground over the currently blocked app.
@@ -139,11 +181,14 @@ class LockActivity : ComponentActivity() {
          * because it holds the "Draw over other apps" permission, so this launch succeeds even
          * though it originates from the background monitor.
          * @param context The calling context (the service).
+         * @param blockedPackage The package that tripped the lock, forwarded so the unlock event is
+         * logged against the real app (which is not always @c com.android.settings on OEM builds).
          */
-        fun start(context: Context) {
+        fun start(context: Context, blockedPackage: String) {
             context.startActivity(
                 Intent(context, LockActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(EXTRA_BLOCKED_PACKAGE, blockedPackage)
             )
         }
     }

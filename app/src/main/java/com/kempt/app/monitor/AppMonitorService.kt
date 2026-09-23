@@ -192,7 +192,9 @@ class AppMonitorService : Service() {
                 // full-screen Activity instead — it can't be hidden the same way. Safe to call
                 // each tick: once the lock Activity is on top, Settings leaves the foreground and
                 // the latch (lockTarget) clears, so this stops firing on the very next tick.
-                LockActivity.start(this)
+                // Pass the exact package that tripped the lock so the unlock event is logged
+                // against the real app — which on some OEM builds is not "com.android.settings".
+                LockActivity.start(this, target)
             } else {
                 val label = labelFor(target)
                 withContext(Dispatchers.Main) {
