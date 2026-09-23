@@ -50,6 +50,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Full-screen passcode lock for apps the overlay can't cover (e.g. Settings).
+             Its own task, kept out of Recents, single-instance so re-launches don't stack. -->
+        <activity
+            android:name=".monitor.LockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Kempt" />
+
         <!-- Foreground service that watches the current app. -->
         <service
             android:name=".monitor.AppMonitorService"

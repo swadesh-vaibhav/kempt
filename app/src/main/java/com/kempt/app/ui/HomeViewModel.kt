@@ -1,3 +1,7 @@
+/**
+ * @file
+ * @brief ViewModel and UI-state models backing the Kempt home screen.
+ */
 package com.kempt.app.ui
 
 import android.app.Application
@@ -26,23 +30,47 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * @brief Immutable snapshot of everything the home screen renders.
+ * @property isArmed Whether a lock is currently active.
+ * @property hasPasscode Whether a partner passcode has been set.
+ * @property rules The user's block rules.
+ * @property recentEvents The recent accountability events, newest first.
+ */
 data class HomeUiState(
     val isArmed: Boolean = false,
     val hasPasscode: Boolean = false,
     val rules: List<BlockRule> = emptyList(),
     val recentEvents: List<BlockEvent> = emptyList()
 ) {
-    /** One tap can only arm once there's a passcode to unlock with and something to block. */
+    /** @brief Whether one-tap lockdown is allowed: not already armed, a passcode set, and at least one enabled rule. */
     val canLockDown: Boolean get() = !isArmed && hasPasscode && rules.any { it.enabled }
 }
 
-/** A launchable app the user can choose to block, shown in the picker with its icon. */
+/**
+ * @brief A launchable app the user can choose to block, shown in the picker with its icon.
+ * @property packageName The app's package id.
+ * @property label The user-visible app name.
+ * @property icon The app icon, decoded to a Compose @c ImageBitmap.
+ */
 data class InstalledApp(
     val packageName: String,
     val label: String,
     val icon: ImageBitmap
 )
 
+/**
+ * @brief Backs the home screen: exposes UI state and handles the passcode, blocklist, lock, and disarm actions.
+ *
+ * @details @c @HiltViewModel lets Hilt supply the constructor dependencies. State is exposed
+ * as @c StateFlow so Jetpack Compose can observe it and recompose on change.
+ *
+ * @param app The application, used for package queries and to start/stop the monitor.
+ * @param lockState The lock-state and passcode store.
+ * @param blockRuleDao DAO for block rules.
+ * @param blockEventDao DAO for accountability events.
+ * @param accountability Outbound channel for event reports.
+ */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val app: Application,
@@ -52,6 +80,12 @@ class HomeViewModel @Inject constructor(
     private val accountability: AccountabilityService
 ) : ViewModel() {
 
+    /**
+     * @brief The observable home-screen state, combined from the lock flags, rules, and events.
+     * @details @c combine merges the four source flows into one; @c stateIn caches the latest
+     * value and keeps the upstream alive for 5s after the last observer leaves, which avoids
+     * restarting the flows on a configuration change such as rotation.
+     */
     val uiState: StateFlow<HomeUiState> = combine(
         lockState.isArmed,
         lockState.hasPasscode,
@@ -61,23 +95,37 @@ class HomeViewModel @Inject constructor(
         HomeUiState(armed, hasPasscode, rules, events)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
-    // The list of installed apps for the picker. Loaded once, off the main thread, because
-    // querying the PackageManager and decoding every app icon is too slow for the UI thread.
+    /** @brief Mutable backing state for the installed-app list (the underscore-prefixed private half of the pair). */
     private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+
+    /**
+     * @brief Read-only view of the installed apps for the picker.
+     * @details Loaded once, off the main thread, because querying the PackageManager and
+     * decoding every app icon is too slow for the UI thread.
+     */
     val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
 
+    /** @brief Kicks off the one-time installed-app load on a background dispatcher when the ViewModel is created. */
     init {
         viewModelScope.launch(Dispatchers.Default) {
             _installedApps.value = loadInstalledApps()
         }
     }
 
+    /**
+     * @brief Sets the partner passcode, ignoring blank input.
+     * @param raw The plaintext passcode; trimmed before it is hashed and stored.
+     */
     fun setPasscode(raw: String) {
         if (raw.isBlank()) return
         viewModelScope.launch { lockState.setPasscode(raw.trim()) }
     }
 
-    /** Check/uncheck an app in the picker: [blocked] true adds a rule for it, false removes it. */
+    /**
+     * @brief Checks or unchecks an app in the picker.
+     * @param packageName The app to toggle.
+     * @param blocked @c true adds a rule for it, @c false removes the rule.
+     */
     fun setAppBlocked(packageName: String, blocked: Boolean) {
         viewModelScope.launch {
             if (blocked) {
@@ -88,7 +136,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    /** One-tap lockdown: arm, start the monitor, schedule the heartbeat, log the event. */
+    /** @brief One-tap lockdown: arm the lock, start the monitor, schedule the heartbeat, and log the event. */
     fun lockDown() {
         viewModelScope.launch {
             lockState.arm()
@@ -99,9 +147,10 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * In-app disarm: verify the partner passcode and, on success, tear the lock down and stop
-     * the monitor. [onResult] is called back (on the main thread) with whether it succeeded so
-     * the screen can show an error on a wrong code.
+     * @brief In-app disarm: verify the partner passcode and, on success, tear the lock down and stop the monitor.
+     * @param rawCode The passcode entered by the user (trimmed before checking).
+     * @param onResult Called back on the main thread with whether the code was correct, so the
+     * screen can show an error on a wrong code.
      */
     fun disarm(rawCode: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
@@ -118,7 +167,11 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    /** Records an event locally, then reports it; marks it synced only if the report lands. */
+    /**
+     * @brief Records an event locally, reports it, and marks it synced only if the report lands.
+     * @param type One of the @ref com.kempt.app.data.BlockEvent type constants.
+     * @param packageName The app the event concerns, or @c null.
+     */
     private suspend fun recordAndReport(type: String, packageName: String? = null) {
         val event = BlockEvent(type = type, packageName = packageName)
         val id = blockEventDao.insert(event)
@@ -127,7 +180,10 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    /** Every launchable app except Kempt itself, sorted by name, each with its icon decoded. */
+    /**
+     * @brief Builds the picker's app list: every launchable app except Kempt, sorted by name, each icon decoded.
+     * @return The installed apps, ready to display.
+     */
     private fun loadInstalledApps(): List<InstalledApp> {
         val pm = app.packageManager
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)

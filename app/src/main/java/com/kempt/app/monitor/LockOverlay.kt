@@ -1,9 +1,14 @@
+/**
+ * @file
+ * @brief The full-screen passcode overlay drawn over blocked apps.
+ */
 package com.kempt.app.monitor
 
 import android.content.Context
 import android.graphics.PixelFormat
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -14,36 +19,53 @@ import android.widget.TextView
 import com.kempt.app.R
 
 /**
- * The full-screen lock drawn over a blocked app via `TYPE_APPLICATION_OVERLAY`. It
- * collects a passcode and hands it to [onSubmit]; the caller verifies it (the check is
- * a suspend/DataStore read) and then calls [dismiss] on success or [showError] on
- * failure. All methods must be called on the main thread.
+ * @brief The full-screen lock drawn over a blocked app via @c TYPE_APPLICATION_OVERLAY.
+ *
+ * @details Collects a passcode and hands it to the @c onSubmit callback; the caller verifies
+ * it (the check is a suspend/DataStore read) and then calls #dismiss on success or #showError
+ * on failure.
+ *
+ * @warning All methods must be called on the main thread.
+ * @param context Context used to inflate the layout and reach the @c WindowManager.
  */
 class LockOverlay(private val context: Context) {
 
+    /** @brief System @c WindowManager used to add and remove the overlay window. */
     private val windowManager =
         context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
+    /** @brief The overlay's root view while shown, or @c null when not added. */
     private var root: View? = null
+
+    /** @brief Cached reference to the "wrong passcode" text, toggled by #showError. */
     private var errorView: TextView? = null
 
     /**
-     * Whether the lock is actually on screen right now.
+     * @brief Whether the lock is actually on screen right now.
      *
-     * This checks real window attachment, not just `root != null`, as a safety net: if the
-     * framework ever tears our window off without [dismiss] being called, `isAttachedToWindow`
-     * flips to false and the monitor will re-add the overlay on its next tick (as long as a
-     * blocked app is still on top). Must be read on the main thread. The `== true` collapses
-     * the nullable result: `null?.isAttachedToWindow` is `null`, and `null == true` is `false`.
+     * @details Checks real window attachment, not just @c root != null, as a safety net: if
+     * the framework tears our window off without #dismiss being called, @c isAttachedToWindow
+     * flips to @c false and the monitor re-adds the overlay on its next tick (as long as a
+     * blocked app is still on top).
+     *
+     * @note @c root?.isAttachedToWindow == true uses Kotlin's safe-call operator @c ?.: on a
+     * @c null @c root the expression is @c null, and @c null == true evaluates to @c false, so
+     * the whole thing collapses to @c false. Must be read on the main thread.
      */
     val isShowing: Boolean get() = root?.isAttachedToWindow == true
 
-    /** Whether we currently hold the "draw over other apps" permission. */
+    /** @brief @return @c true if the "draw over other apps" permission is currently held. */
     fun canDraw(): Boolean = Settings.canDrawOverlays(context)
 
     /**
-     * Show the lock for [blockedLabel]. [onSubmit] is invoked on the main thread with
-     * the entered code each time the user taps Unlock.
+     * @brief Shows the lock for a blocked app and wires up the Unlock button.
+     *
+     * @details No-ops if already showing or the overlay permission is missing. Any orphaned
+     * previous view (one the system detached without a #dismiss) is removed first so a stale
+     * window isn't leaked.
+     *
+     * @param blockedLabel The app name to display in the lock message.
+     * @param onSubmit Invoked on the main thread with the entered code each time Unlock is tapped.
      */
     fun show(blockedLabel: String, onSubmit: (String) -> Unit) {
         if (isShowing || !canDraw()) return
@@ -85,14 +107,19 @@ class LockOverlay(private val context: Context) {
             PixelFormat.OPAQUE
         ).apply { gravity = Gravity.CENTER }
 
-        windowManager.addView(view, params)
-        root = view
+        // runCatching wraps the call and captures any exception instead of crashing, so a
+        // refused overlay (e.g. the system blocking overlays over Settings) is logged, not fatal.
+        runCatching { windowManager.addView(view, params) }
+            .onSuccess { root = view }
+            .onFailure { Log.w("AppMonitor", "overlay addView failed for $blockedLabel", it) }
     }
 
+    /** @brief Reveals the "wrong passcode" message. Call after a failed verification. */
     fun showError() {
         errorView?.visibility = View.VISIBLE
     }
 
+    /** @brief Removes the overlay window (if present) and drops all view references. */
     fun dismiss() {
         root?.let { runCatching { windowManager.removeView(it) } }
         root = null

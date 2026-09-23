@@ -1,3 +1,7 @@
+/**
+ * @file
+ * @brief The single activity and Jetpack Compose UI for the Kempt home and app-picker screens.
+ */
 package com.kempt.app
 
 import android.Manifest
@@ -65,8 +69,17 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * @brief The app's only activity; hosts the entire Compose UI.
+ * @details @c @AndroidEntryPoint enables Hilt injection, which is what lets @c hiltViewModel()
+ * inside the composables obtain a @ref com.kempt.app.ui.HomeViewModel.
+ */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    /**
+     * @brief Enables edge-to-edge drawing and installs the Compose content tree.
+     * @param savedInstanceState The standard saved-state bundle (unused here).
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -80,6 +93,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * @brief Stateful entry composable that switches between the home screen and the app picker.
+ *
+ * @details Collects the ViewModel state, requests the notification permission on first
+ * composition (Android 13+), and recomputes the special-access permission flags whenever the
+ * user returns from a Settings screen.
+ *
+ * @param modifier Layout modifier from the hosting scaffold.
+ * @param viewModel The screen's ViewModel, supplied by Hilt via @c hiltViewModel().
+ */
 @Composable
 private fun HomeRoute(
     modifier: Modifier = Modifier,
@@ -135,6 +158,21 @@ private fun HomeRoute(
     }
 }
 
+/**
+ * @brief The main home screen: title plus either the locked card or the setup cards and the
+ * "Lock down" button, followed by the recent-activity log.
+ *
+ * @param state The current UI state.
+ * @param selectedAppCount How many apps are currently on the blocklist.
+ * @param hasUsageAccess Whether usage access is granted.
+ * @param hasOverlay Whether the overlay permission is granted.
+ * @param onRefreshPermissions Called to re-check permissions after returning from Settings.
+ * @param onSetPasscode Called with a new partner passcode.
+ * @param onOpenAppPicker Called to open the app picker.
+ * @param onLockDown Called to arm the lock.
+ * @param onDisarm Called with the entered code and a success callback to attempt an unlock.
+ * @param modifier Layout modifier.
+ */
 @Composable
 private fun HomeScreen(
     state: HomeUiState,
@@ -202,6 +240,10 @@ private fun HomeScreen(
     }
 }
 
+/**
+ * @brief Card shown while armed: prompts for the partner passcode and reports wrong entries.
+ * @param onDisarm Called with the entered code and a callback that receives whether it succeeded.
+ */
 @Composable
 private fun LockedCard(onDisarm: (String, (Boolean) -> Unit) -> Unit) {
     var code by remember { mutableStateOf("") }
@@ -236,6 +278,15 @@ private fun LockedCard(onDisarm: (String, (Boolean) -> Unit) -> Unit) {
     }
 }
 
+/**
+ * @brief Card listing the required and optional special-access permissions with grant buttons.
+ * @param hasUsageAccess Whether usage access is granted.
+ * @param hasOverlay Whether the overlay permission is granted.
+ * @param onOpenUsageAccess Opens the usage-access settings screen.
+ * @param onOpenOverlay Opens the overlay settings screen.
+ * @param onOpenBattery Opens the battery-optimization settings screen.
+ * @param onRefresh Re-checks permissions after the user grants them.
+ */
 @Composable
 private fun PermissionsCard(
     hasUsageAccess: Boolean,
@@ -260,6 +311,12 @@ private fun PermissionsCard(
     }
 }
 
+/**
+ * @brief One permission row: a label (with a ✓ when granted) and a Grant button when not.
+ * @param label The permission's display name.
+ * @param granted Whether it's currently granted.
+ * @param onOpen Opens the relevant settings screen.
+ */
 @Composable
 private fun PermissionRow(label: String, granted: Boolean, onOpen: () -> Unit) {
     Row(
@@ -277,6 +334,11 @@ private fun PermissionRow(label: String, granted: Boolean, onOpen: () -> Unit) {
     }
 }
 
+/**
+ * @brief Card for setting or changing the partner passcode.
+ * @param hasPasscode Whether a passcode already exists (changes the labels shown).
+ * @param onSetPasscode Called with the entered passcode when the user saves.
+ */
 @Composable
 private fun PasscodeCard(hasPasscode: Boolean, onSetPasscode: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
@@ -302,6 +364,11 @@ private fun PasscodeCard(hasPasscode: Boolean, onSetPasscode: (String) -> Unit) 
     }
 }
 
+/**
+ * @brief Card summarising how many apps are blocked, with a button to open the picker.
+ * @param selectedCount Number of apps currently selected.
+ * @param onOpenAppPicker Opens the app picker.
+ */
 @Composable
 private fun BlocklistCard(
     selectedCount: Int,
@@ -325,9 +392,18 @@ private fun BlocklistCard(
 }
 
 /**
- * Full-screen list of installed apps with a checkbox each. Shown on top of the home screen
- * when the user taps "Select apps to block", and dismissed with Done or the system back
- * button. As its own screen (not nested in the home's scroll) it can use a lazy list.
+ * @brief Full-screen list of installed apps with a checkbox each.
+ *
+ * @details Shown on top of the home screen when the user taps "Select apps to block", and
+ * dismissed with Done or the system back button. As its own screen (not nested in the home's
+ * scroll) it can use a lazy list. The hardware/gesture back action is routed to closing the
+ * picker rather than exiting the app.
+ *
+ * @param installedApps The apps to list.
+ * @param blockedPackages The package names currently blocked (rendered as checked).
+ * @param onToggleApp Called with a package and its new checked state.
+ * @param onClose Closes the picker.
+ * @param modifier Layout modifier.
  */
 @Composable
 private fun AppPickerScreen(
@@ -374,6 +450,12 @@ private fun AppPickerScreen(
     }
 }
 
+/**
+ * @brief One row in the app picker: icon, label, and a checkbox; tapping the row toggles it.
+ * @param app The app to display.
+ * @param checked Whether it's currently blocked.
+ * @param onToggleApp Called with the package and its new checked state.
+ */
 @Composable
 private fun AppPickerRow(
     app: InstalledApp,
@@ -407,6 +489,10 @@ private fun AppPickerRow(
     }
 }
 
+/**
+ * @brief Card showing up to the 15 most recent accountability events with their timestamps.
+ * @param events The recent events, newest first.
+ */
 @Composable
 private fun EventLogCard(events: List<BlockEvent>) {
     SectionCard("Recent activity") {
@@ -443,6 +529,11 @@ private fun EventLogCard(events: List<BlockEvent>) {
     }
 }
 
+/**
+ * @brief Reusable titled card that wraps arbitrary content.
+ * @param title The card's heading.
+ * @param content The composable body, passed as a trailing lambda.
+ */
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -459,6 +550,11 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Spacer(Modifier.height(0.dp))
 }
 
+/**
+ * @brief Maps a @ref com.kempt.app.data.BlockEvent type constant to a human-readable label for the log.
+ * @param type The stored event-type string.
+ * @return A display string, or @p type itself if unrecognised.
+ */
 private fun prettyType(type: String): String = when (type) {
     BlockEvent.LOCK_ARMED -> "Locked down"
     BlockEvent.LOCK_DISARMED -> "Unlocked"
