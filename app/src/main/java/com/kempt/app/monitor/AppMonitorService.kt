@@ -56,6 +56,18 @@ class AppMonitorService : Service() {
     private var enforcingPackage: String? = null
     private var usageAccessLostReported = false
 
+    /**
+     * The blocked app we believe is on top right now, or null. This is *latched*: it's set
+     * when a blocked app resumes and only cleared when that same app pauses — see
+     * [updateLockTarget]. It is deliberately not recomputed from scratch each tick, so it
+     * survives the bogus "android"/launcher foreground reports and quiet idle stretches
+     * that broke the old single-poll detection.
+     */
+    private var lockTarget: String? = null
+
+    /** Timestamp of the newest usage event we've already folded into [lockTarget]. */
+    private var lastEventTime = 0L
+
     override fun onCreate() {
         super.onCreate()
         overlay = LockOverlay(this)
@@ -91,18 +103,19 @@ class AppMonitorService : Service() {
         }
         usageAccessLostReported = false
 
-        val foreground = currentForegroundPackage()
         val blocked = blockRuleDao.enabledPackages().toSet()
+        updateLockTarget(blocked)
+        val target = lockTarget
 
-        if (foreground != null && foreground != packageName && foreground in blocked) {
-            if (enforcingPackage != foreground) {
-                enforcingPackage = foreground
-                recordAndReport(BlockEvent.BLOCK_ENFORCED, foreground)
+        if (target != null) {
+            if (enforcingPackage != target) {
+                enforcingPackage = target
+                recordAndReport(BlockEvent.BLOCK_ENFORCED, target)
             }
-            val label = labelFor(foreground)
+            val label = labelFor(target)
             withContext(Dispatchers.Main) {
                 if (!overlay.isShowing) {
-                    overlay.show(label) { code -> onPasscodeSubmit(code, foreground) }
+                    overlay.show(label) { code -> onPasscodeSubmit(code, target) }
                 }
             }
         } else {
@@ -130,6 +143,7 @@ class AppMonitorService : Service() {
 
     private suspend fun teardownAndStop() {
         enforcingPackage = null
+        lockTarget = null
         withContext(Dispatchers.Main) { if (overlay.isShowing) overlay.dismiss() }
         stopSelf()
     }
@@ -143,22 +157,47 @@ class AppMonitorService : Service() {
         }
     }
 
-    /** Most-recent app moved to the foreground within the lookback window, if any. */
-    private fun currentForegroundPackage(): String? {
+    /**
+     * Fold every usage event we haven't seen yet into [lockTarget].
+     *
+     * The rule is a two-signal latch, not a snapshot:
+     *  - A blocked app's own ACTIVITY_RESUMED arms the lock on that package.
+     *  - That same package's ACTIVITY_PAUSED/STOPPED releases it.
+     *  - Everything else is ignored — importantly, a RESUMED for a *non-blocked* app (the
+     *    launcher, "android", SystemUI) never releases the lock. Some Android builds report
+     *    those as the foreground while a blocked app is still genuinely on top; the old
+     *    "latest RESUMED wins" logic believed them and tore the lock down. Android always
+     *    pauses the outgoing app when you truly leave, so the blocked app's own pause is the
+     *    only trustworthy release signal.
+     *
+     * We consume events incrementally from [lastEventTime] forward (rather than re-scanning a
+     * fixed 10s window), so [lockTarget] persists across quiet stretches: if you sit on the
+     * lock for minutes, no new event arrives, nothing clears the latch, and the overlay stays.
+     */
+    private fun updateLockTarget(blocked: Set<String>) {
         val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val end = System.currentTimeMillis()
-        val events = usm.queryEvents(end - LOOKBACK_MS, end)
+        val now = System.currentTimeMillis()
+        // Cold start (lastEventTime == 0): look back a little to pick up an app opened just
+        // before the monitor's first tick. Afterwards, resume from the last event we folded in.
+        val begin = if (lastEventTime == 0L) now - LOOKBACK_MS else lastEventTime
+        val events = usm.queryEvents(begin, now)
         val event = UsageEvents.Event()
-        var latest: String? = null
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            // ACTIVITY_RESUMED (API 29+) has the same value as the older, deprecated
-            // MOVE_TO_FOREGROUND, so this one check covers every supported API level.
-            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
-                latest = event.packageName
+            when (event.eventType) {
+                // ACTIVITY_RESUMED (API 29+) shares its value with the deprecated
+                // MOVE_TO_FOREGROUND, so this covers every supported API level.
+                UsageEvents.Event.ACTIVITY_RESUMED ->
+                    if (event.packageName != packageName && event.packageName in blocked) {
+                        lockTarget = event.packageName
+                    }
+                UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->
+                    if (event.packageName == lockTarget) {
+                        lockTarget = null
+                    }
             }
+            if (event.timeStamp > lastEventTime) lastEventTime = event.timeStamp
         }
-        return latest
     }
 
     private fun hasUsageAccess(): Boolean = Permissions.hasUsageAccess(this)
