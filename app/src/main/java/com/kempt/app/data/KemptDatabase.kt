@@ -66,6 +66,16 @@ data class BlockEvent(
         const val USAGE_ACCESS_LOST = "usage_access_lost"
         /** @brief The monitor was re-armed after a reboot. */
         const val BOOT_REARM = "boot_rearm"
+        /** @brief Uninstall protection (device admin) was turned on. */
+        const val DEVICE_ADMIN_ENABLED = "device_admin_enabled"
+        /**
+         * @brief The user asked to remove uninstall protection (device admin) — a tamper signal.
+         * @details Deactivating the admin is the first step to uninstalling Kempt, so this is the
+         * "trying to break out" moment reported to the partner.
+         */
+        const val DEVICE_ADMIN_DISABLE_REQUESTED = "device_admin_disable_requested"
+        /** @brief Uninstall protection (device admin) was turned off. */
+        const val DEVICE_ADMIN_DISABLED = "device_admin_disabled"
     }
 }
 

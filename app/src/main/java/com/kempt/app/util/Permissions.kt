@@ -5,12 +5,16 @@
 package com.kempt.app.util
 
 import android.app.AppOpsManager
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import com.kempt.app.R
+import com.kempt.app.monitor.KemptDeviceAdminReceiver
 
 /**
  * @brief Central place for Kempt's special-access permission checks and grant intents.
@@ -84,4 +88,64 @@ object Permissions {
      */
     fun batteryOptimizationSettings(): Intent =
         Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+
+    /**
+     * @brief Resolves the @c ComponentName of Kempt's device-admin receiver.
+     * @details A @c ComponentName is the fully-qualified address (package + class) of a component;
+     * the device-admin APIs identify our admin by it. Every device-admin call below routes through
+     * this so the address is defined in exactly one place.
+     * @param context Any context; used to resolve the package.
+     * @return The component name of @ref com.kempt.app.monitor.KemptDeviceAdminReceiver.
+     */
+    fun deviceAdminComponent(context: Context): ComponentName =
+        ComponentName(context, KemptDeviceAdminReceiver::class.java)
+
+    /**
+     * @brief Checks whether Kempt is currently an active device administrator (uninstall protection on).
+     * @details While this is @c true, Android blocks Kempt's uninstall through the normal
+     * launcher / Settings flow — the "friction" half of the uninstall-protection design.
+     * @param context Any context; used to resolve the device-policy service.
+     * @return @c true when Kempt's device admin is active.
+     */
+    fun isDeviceAdminActive(context: Context): Boolean =
+        devicePolicyManager(context).isAdminActive(deviceAdminComponent(context))
+
+    /**
+     * @brief Builds the intent that opens the system "activate device admin?" consent screen for Kempt.
+     * @details Device admin, like the other special-access grants, can't be turned on with an in-app
+     * dialog — only the user can confirm it on a system screen. @c EXTRA_ADD_EXPLANATION supplies the
+     * reassurance text shown there. Launch this for a result so the UI can re-check the state on return.
+     * @param context Used to embed the admin component and read the explanation string.
+     * @return An @c Intent the caller can start (ideally for a result).
+     */
+    fun addDeviceAdminIntent(context: Context): Intent =
+        Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, deviceAdminComponent(context))
+            .putExtra(
+                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                context.getString(R.string.uninstall_protection_explanation)
+            )
+
+    /**
+     * @brief Turns uninstall protection off by removing Kempt's own device-admin registration.
+     * @details An app may always deactivate its *own* admin with no extra permission. This is the
+     * clean, in-app way to switch protection off (the system's "device admin" Settings screen is the
+     * other way, and it's the one that triggers the tamper report). Deactivating fires
+     * @ref com.kempt.app.monitor.KemptDeviceAdminReceiver.onDisabled, which logs the change.
+     * Calling it when the admin isn't active is a harmless no-op.
+     * @param context Any context; used to resolve the device-policy service.
+     */
+    fun removeDeviceAdmin(context: Context) {
+        val dpm = devicePolicyManager(context)
+        val component = deviceAdminComponent(context)
+        if (dpm.isAdminActive(component)) dpm.removeActiveAdmin(component)
+    }
+
+    /**
+     * @brief Resolves the system @c DevicePolicyManager.
+     * @param context Any context.
+     * @return The device-policy service used by the device-admin helpers above.
+     */
+    private fun devicePolicyManager(context: Context): DevicePolicyManager =
+        context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
 }

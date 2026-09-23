@@ -70,6 +70,26 @@
                 android:value="app_usage_monitoring_for_self_control" />
         </service>
 
+        <!-- Uninstall protection: registering as a device administrator makes Android refuse
+             Kempt's uninstall while the admin is active. Friction, not a wall — the deactivation
+             it forces is reported to the partner (see KemptDeviceAdminReceiver).
+             The policy set (@xml/device_admin) is empty, so this admin can ONLY block its own
+             uninstall — no wipe, lock, or password powers.
+             exported="true" is required because the OS (a different process) delivers the admin
+             broadcasts; BIND_DEVICE_ADMIN restricts those broadcasts to the system alone. -->
+        <receiver
+            android:name=".monitor.KemptDeviceAdminReceiver"
+            android:exported="true"
+            android:description="@string/uninstall_protection_explanation"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Re-arm active blocks after a reboot. -->
         <receiver
             android:name=".monitor.BootReceiver"

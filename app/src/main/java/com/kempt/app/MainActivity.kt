@@ -116,6 +116,7 @@ private fun HomeRoute(
     var permissionTick by remember { mutableIntStateOf(0) }
     val hasUsageAccess = remember(permissionTick) { Permissions.hasUsageAccess(context) }
     val hasOverlay = remember(permissionTick) { Permissions.canDrawOverlays(context) }
+    val hasUninstallProtection = remember(permissionTick) { Permissions.isDeviceAdminActive(context) }
 
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -148,6 +149,7 @@ private fun HomeRoute(
             selectedAppCount = blockedPackages.size,
             hasUsageAccess = hasUsageAccess,
             hasOverlay = hasOverlay,
+            hasUninstallProtection = hasUninstallProtection,
             onRefreshPermissions = { permissionTick++ },
             onSetPasscode = viewModel::setPasscode,
             onOpenAppPicker = { showAppPicker = true },
@@ -166,6 +168,7 @@ private fun HomeRoute(
  * @param selectedAppCount How many apps are currently on the blocklist.
  * @param hasUsageAccess Whether usage access is granted.
  * @param hasOverlay Whether the overlay permission is granted.
+ * @param hasUninstallProtection Whether Kempt is an active device admin (uninstall protection on).
  * @param onRefreshPermissions Called to re-check permissions after returning from Settings.
  * @param onSetPasscode Called with a new partner passcode.
  * @param onOpenAppPicker Called to open the app picker.
@@ -179,6 +182,7 @@ private fun HomeScreen(
     selectedAppCount: Int,
     hasUsageAccess: Boolean,
     hasOverlay: Boolean,
+    hasUninstallProtection: Boolean,
     onRefreshPermissions: () -> Unit,
     onSetPasscode: (String) -> Unit,
     onOpenAppPicker: () -> Unit,
@@ -187,6 +191,12 @@ private fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    // The "activate device admin?" screen returns a result, so launch it for one and refresh the
+    // permission flags when the user comes back — no manual "refresh" tap needed for this grant.
+    val deviceAdminLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { onRefreshPermissions() }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -206,6 +216,7 @@ private fun HomeScreen(
             PermissionsCard(
                 hasUsageAccess = hasUsageAccess,
                 hasOverlay = hasOverlay,
+                hasUninstallProtection = hasUninstallProtection,
                 onOpenUsageAccess = {
                     context.startActivity(Permissions.usageAccessSettings())
                 },
@@ -214,6 +225,13 @@ private fun HomeScreen(
                 },
                 onOpenBattery = {
                     context.startActivity(Permissions.batteryOptimizationSettings())
+                },
+                onEnableUninstallProtection = {
+                    deviceAdminLauncher.launch(Permissions.addDeviceAdminIntent(context))
+                },
+                onDisableUninstallProtection = {
+                    Permissions.removeDeviceAdmin(context)
+                    onRefreshPermissions()
                 },
                 onRefresh = onRefreshPermissions
             )
@@ -282,18 +300,24 @@ private fun LockedCard(onDisarm: (String, (Boolean) -> Unit) -> Unit) {
  * @brief Card listing the required and optional special-access permissions with grant buttons.
  * @param hasUsageAccess Whether usage access is granted.
  * @param hasOverlay Whether the overlay permission is granted.
+ * @param hasUninstallProtection Whether uninstall protection (device admin) is active.
  * @param onOpenUsageAccess Opens the usage-access settings screen.
  * @param onOpenOverlay Opens the overlay settings screen.
  * @param onOpenBattery Opens the battery-optimization settings screen.
+ * @param onEnableUninstallProtection Launches the "activate device admin?" consent screen.
+ * @param onDisableUninstallProtection Turns uninstall protection off (removes Kempt's device admin).
  * @param onRefresh Re-checks permissions after the user grants them.
  */
 @Composable
 private fun PermissionsCard(
     hasUsageAccess: Boolean,
     hasOverlay: Boolean,
+    hasUninstallProtection: Boolean,
     onOpenUsageAccess: () -> Unit,
     onOpenOverlay: () -> Unit,
     onOpenBattery: () -> Unit,
+    onEnableUninstallProtection: () -> Unit,
+    onDisableUninstallProtection: () -> Unit,
     onRefresh: () -> Unit
 ) {
     SectionCard("Permissions") {
@@ -306,6 +330,30 @@ private fun PermissionsCard(
         ) {
             Text("Battery exemption (optional)", style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(onClick = onOpenBattery) { Text("Open") }
+        }
+        // Uninstall protection differs from the rows above: when it's on we offer a "Turn off"
+        // action (an app can always deactivate its own device admin). This control lives only in
+        // the not-armed setup UI, and Settings is force-blocked while armed, so protection can't be
+        // peeled off mid-lock from here. The label takes weight(1f) so the longer text wraps instead
+        // of shoving the button off-screen.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (hasUninstallProtection) "Uninstall protection ✓"
+                else "Uninstall protection (recommended)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (hasUninstallProtection) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            if (hasUninstallProtection) {
+                OutlinedButton(onClick = onDisableUninstallProtection) { Text("Turn off") }
+            } else {
+                OutlinedButton(onClick = onEnableUninstallProtection) { Text("Enable") }
+            }
         }
         TextButton(onClick = onRefresh) { Text("I've granted these — refresh") }
     }
@@ -563,5 +611,8 @@ private fun prettyType(type: String): String = when (type) {
     BlockEvent.UNLOCK_FAILED -> "Wrong passcode"
     BlockEvent.USAGE_ACCESS_LOST -> "Usage access revoked (tamper)"
     BlockEvent.BOOT_REARM -> "Re-armed after reboot"
+    BlockEvent.DEVICE_ADMIN_ENABLED -> "Uninstall protection on"
+    BlockEvent.DEVICE_ADMIN_DISABLE_REQUESTED -> "Uninstall protection removal attempted (tamper)"
+    BlockEvent.DEVICE_ADMIN_DISABLED -> "Uninstall protection off"
     else -> type
 }

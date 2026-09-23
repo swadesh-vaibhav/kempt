@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Device-admin policy set for Kempt.
+
+  Deliberately EMPTY. Kempt registers as a device administrator for exactly one
+  side effect: while an admin is active, Android refuses to uninstall the owning
+  app through the normal launcher / Settings flow. That uninstall block does not
+  require declaring any policy, so we declare none.
+
+  We intentionally do NOT request the invasive policies a device admin *can* ask
+  for (wipe-data, force-lock, password rules, encryption, etc.). Keeping this list
+  empty means:
+    - the system consent screen shows the user a reassuring "no powers" admin,
+    - Kempt cannot wipe the device or touch the lock screen even by mistake, and
+    - the Play Store review footprint stays minimal (we lean only on the
+      uninstall-block behaviour, not on any of the deprecated management policies).
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies />
+</device-admin>

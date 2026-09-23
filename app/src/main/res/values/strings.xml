@@ -8,4 +8,8 @@
     <string name="overlay_passcode_hint">Partner passcode</string>
     <string name="overlay_unlock">Unlock</string>
     <string name="overlay_wrong_passcode">Wrong passcode. Your partner has been notified.</string>
+
+    <!-- Uninstall protection (Device Admin) -->
+    <string name="uninstall_protection_explanation">Kempt uses device administrator access only to make itself harder to uninstall while a lock is active. It cannot wipe your device, change your screen lock, or read your data. You can turn it off in Kempt anytime a lock is not active.</string>
+    <string name="uninstall_protection_disable_warning">Turning off uninstall protection will be reported to your accountability partner.</string>
 </resources>

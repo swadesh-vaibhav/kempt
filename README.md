@@ -106,13 +106,13 @@ Partner's phone        Kempt (partner mode): receives alerts, approves unlocks
 - Notify-on-break and notify-on-tamper via FCM
 - Boot persistence (re-arm active blocks on reboot)
 - Permission onboarding flow
+- Device Admin uninstall protection (friction + a tamper signal when it's removed)
 
 ## Later (post-MVP)
 
 - Real-time remote OTP / partner approval
 - Website blocking (local VPN — a separate Play policy conversation)
 - AccessibilityService "strong mode" (with a proper policy declaration)
-- Device Admin uninstall-lock
 - Usage insights / stats
 - iOS (a very different build — Family Controls / ManagedSettings)
 
