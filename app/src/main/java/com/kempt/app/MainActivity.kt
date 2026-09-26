@@ -116,6 +116,7 @@ private fun HomeRoute(
     var permissionTick by remember { mutableIntStateOf(0) }
     val hasUsageAccess = remember(permissionTick) { Permissions.hasUsageAccess(context) }
     val hasOverlay = remember(permissionTick) { Permissions.canDrawOverlays(context) }
+    val hasBatteryExemption = remember(permissionTick) { Permissions.isIgnoringBatteryOptimizations(context) }
     val hasUninstallProtection = remember(permissionTick) { Permissions.isDeviceAdminActive(context) }
 
     val notificationLauncher = rememberLauncherForActivityResult(
@@ -149,6 +150,7 @@ private fun HomeRoute(
             selectedAppCount = blockedPackages.size,
             hasUsageAccess = hasUsageAccess,
             hasOverlay = hasOverlay,
+            hasBatteryExemption = hasBatteryExemption,
             hasUninstallProtection = hasUninstallProtection,
             onRefreshPermissions = { permissionTick++ },
             onSetPasscode = viewModel::setPasscode,
@@ -168,6 +170,7 @@ private fun HomeRoute(
  * @param selectedAppCount How many apps are currently on the blocklist.
  * @param hasUsageAccess Whether usage access is granted.
  * @param hasOverlay Whether the overlay permission is granted.
+ * @param hasBatteryExemption Whether Kempt is exempt from battery optimization (optional grant).
  * @param hasUninstallProtection Whether Kempt is an active device admin (uninstall protection on).
  * @param onRefreshPermissions Called to re-check permissions after returning from Settings.
  * @param onSetPasscode Called with a new partner passcode.
@@ -182,6 +185,7 @@ private fun HomeScreen(
     selectedAppCount: Int,
     hasUsageAccess: Boolean,
     hasOverlay: Boolean,
+    hasBatteryExemption: Boolean,
     hasUninstallProtection: Boolean,
     onRefreshPermissions: () -> Unit,
     onSetPasscode: (String) -> Unit,
@@ -216,6 +220,7 @@ private fun HomeScreen(
             PermissionsCard(
                 hasUsageAccess = hasUsageAccess,
                 hasOverlay = hasOverlay,
+                hasBatteryExemption = hasBatteryExemption,
                 hasUninstallProtection = hasUninstallProtection,
                 onOpenUsageAccess = {
                     context.startActivity(Permissions.usageAccessSettings())
@@ -300,6 +305,7 @@ private fun LockedCard(onDisarm: (String, (Boolean) -> Unit) -> Unit) {
  * @brief Card listing the required and optional special-access permissions with grant buttons.
  * @param hasUsageAccess Whether usage access is granted.
  * @param hasOverlay Whether the overlay permission is granted.
+ * @param hasBatteryExemption Whether Kempt is exempt from battery optimization (optional grant).
  * @param hasUninstallProtection Whether uninstall protection (device admin) is active.
  * @param onOpenUsageAccess Opens the usage-access settings screen.
  * @param onOpenOverlay Opens the overlay settings screen.
@@ -312,6 +318,7 @@ private fun LockedCard(onDisarm: (String, (Boolean) -> Unit) -> Unit) {
 private fun PermissionsCard(
     hasUsageAccess: Boolean,
     hasOverlay: Boolean,
+    hasBatteryExemption: Boolean,
     hasUninstallProtection: Boolean,
     onOpenUsageAccess: () -> Unit,
     onOpenOverlay: () -> Unit,
@@ -323,13 +330,22 @@ private fun PermissionsCard(
     SectionCard("Permissions") {
         PermissionRow("Usage access", hasUsageAccess, onOpenUsageAccess)
         PermissionRow("Draw over other apps", hasOverlay, onOpenOverlay)
+        // Battery exemption mirrors PermissionRow's granted styling (✓ + primary colour, button
+        // hidden once granted) but keeps its own "(optional)" wording and "Open" button label,
+        // since it opens the system-wide battery list rather than a Kempt-specific Grant screen.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Battery exemption (optional)", style = MaterialTheme.typography.bodyMedium)
-            OutlinedButton(onClick = onOpenBattery) { Text("Open") }
+            Text(
+                text = if (hasBatteryExemption) "Battery exemption (optional) ✓"
+                else "Battery exemption (optional)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (hasBatteryExemption) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface
+            )
+            if (!hasBatteryExemption) OutlinedButton(onClick = onOpenBattery) { Text("Open") }
         }
         // Uninstall protection differs from the rows above: when it's on we offer a "Turn off"
         // action (an app can always deactivate its own device admin). This control lives only in

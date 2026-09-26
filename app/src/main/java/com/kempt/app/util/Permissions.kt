@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import com.kempt.app.R
@@ -61,6 +62,24 @@ object Permissions {
      * @return @c true when the "Draw over other apps" permission is granted.
      */
     fun canDrawOverlays(context: Context): Boolean = Settings.canDrawOverlays(context)
+
+    /**
+     * @brief Checks whether Kempt is currently exempt from battery optimization (Doze / App Standby).
+     *
+     * @details When exempt, Android stops throttling Kempt in the background, which helps the
+     * monitor's 1-second polling loop and the 15-minute heartbeat keep running under Doze. This
+     * grant is *optional* — it does not gate @ref com.kempt.app.ui.HomeUiState.canLockDown — but
+     * the UI should reflect whether it's on. The check routes through @c PowerManager and is keyed
+     * by package name; @c isIgnoringBatteryOptimizations exists since API 23 and @c minSdk is 26,
+     * so no version guard is needed.
+     *
+     * @param context Any context; used to resolve the power service and the package name.
+     * @return @c true when Kempt is currently exempt from battery optimization.
+     */
+    fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    }
 
     /**
      * @brief Builds an intent that opens the system "Usage access" settings list.
