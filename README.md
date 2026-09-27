@@ -136,5 +136,53 @@ Partner's phone        Kempt (partner mode): receives alerts, approves unlocks
 
 ## Getting started
 
-_TBD._ Android project scaffolding, `applicationId` (to be derived from a secured
-domain), and backend setup to follow.
+### Prerequisites
+
+- **JDK 17** — AGP 8.13 doesn't support newer JDKs; point `JAVA_HOME` at a JDK 17–21.
+- Android SDK (set `sdk.dir` in `local.properties`, which is untracked).
+
+```bash
+./gradlew :app:assembleDebug     # build the debug APK
+./gradlew :app:installDebug      # build + install to a device/emulator
+```
+
+> `applicationId` is `com.kempt.app`
+
+### Firebase config (required — not in the repo)
+
+The app is wired to a Firebase project (Auth + Firestore + FCM), and **the build
+fails without `app/google-services.json`**. That file is deliberately **git-ignored**
+(it holds project config, not source — see `.gitignore`), so it is *not* checked in and
+must be supplied in **both** of these places:
+
+**1. Local development.** Download it once from the Firebase console
+(*Project settings → Your apps → Android app → `google-services.json`*) and drop it at:
+
+```
+app/google-services.json
+```
+
+Google Sign-In additionally needs:
+- the project's **OAuth *Web* client ID** in `app/src/main/res/values/auth.xml` (this
+  file *is* committed; change the value only if you point the app at a different Firebase
+  project), and
+- your build's **SHA-1** registered in the Firebase console — the *debug* SHA-1 for local
+  builds, and the *release* / Play App Signing SHA-1 for published builds.
+
+**2. CI / deployments.** Because `google-services.json` isn't in the repo, CI must
+recreate it before the Gradle build. Store its contents as an encrypted secret
+(base64-encoded) and decode it in a step — e.g. GitHub Actions:
+
+```yaml
+- name: Restore google-services.json
+  run: echo "$GOOGLE_SERVICES_JSON" | base64 --decode > app/google-services.json
+  env:
+    GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+```
+
+Generate the secret value from your local copy and paste it into the CI provider's
+secret store as `GOOGLE_SERVICES_JSON`:
+
+```bash
+base64 -i app/google-services.json | pbcopy   # macOS: base64 → clipboard
+```

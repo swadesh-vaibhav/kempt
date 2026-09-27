@@ -1,0 +1,214 @@
+rules_version = '2';
+
+// =============================================================================
+// Kempt — Firestore Security Rules  (PROTOTYPE — review before public launch)
+// =============================================================================
+//
+// Two human roles, each a Firebase Auth user with a uid:
+//   - "accountable user"  — owns the device running Kempt; their app authenticates
+//                           as their uid and writes events/heartbeats.
+//   - "partner"           — a *different* Auth user who may read the accountable
+//                           user's log and issue remote unlock/lock grants.
+//
+// The link between them is a `pairings` document. Establishing a pairing is
+// trusted logic (it grants one person visibility into another's data), so it is
+// created ONLY by a Cloud Function via the Admin SDK — clients cannot write it.
+//
+// -----------------------------------------------------------------------------
+// Assumed Data Model
+// -----------------------------------------------------------------------------
+//
+// Collection: users
+// Document ID: {uid}  (the Auth uid)
+// Fields:
+//   - displayName: string (required, 1..80)         — safe, non-PII display name
+//   - createdAt:   timestamp (required, immutable)
+//   Read: owner only (may hold PII later). No cross-user reads — the partner's
+//   display name is denormalized onto the pairing doc instead.
+//
+// Subcollection: users/{uid}/devices
+// Document ID: {deviceId}
+// Fields:
+//   - platform:        string (required, 1..20, immutable) — e.g. "android"
+//   - armed:           bool (required)                     — current lock state
+//   - createdAt:       timestamp (required, immutable)
+//   - fcmToken:        string (optional, <=4096)           — push credential
+//   - lastHeartbeatAt: timestamp (optional)                — updated each heartbeat
+//   Read: owner ONLY. Holds the FCM push token, so it is never partner-readable;
+//   the heartbeat watchdog reads it server-side (Admin SDK bypasses these rules).
+//
+// Subcollection: users/{uid}/events   (append-only accountability log)
+// Document ID: {eventId} (auto)
+// Fields:
+//   - type:        string (required) — one of BlockEvent's constants (see enum below)
+//   - at:          timestamp (required, not >5m in the future)
+//   - packageName: string (optional, 1..255)
+//   - deviceId:    string (optional, 1..128)
+//   Create: owner only. Read: owner OR accepted partner. NEVER update/delete —
+//   this is a tamper-evident log (the accountable user must not erase their own
+//   unlock_failed / tamper events).
+//
+// Subcollection: users/{uid}/grants   (remote unlock / lock commands)
+// Document ID: {grantId} (auto)
+// Fields:
+//   - action:      string (required) — "unlock" | "lock"
+//   - issuedByUid: string (required) — must equal the creating partner's uid
+//   - createdAt:   timestamp (required)
+//   - status:      string (required) — always "active" on create
+//   - expiresAt:   timestamp — REQUIRED for "unlock" (future, <=30d); ABSENT for "lock"
+//   Create: accepted partner ONLY (the accountable user can NOT unlock themselves).
+//   Read: owner (device reacts to it) OR accepted partner. No update/delete —
+//   timed unlocks expire by `expiresAt`, enforced on-device; early re-lock is a
+//   new "lock" grant, not a mutation.
+//
+// Collection: pairings
+// Document ID: {accountableUid}_{partnerUid}  (deterministic, so rules can look it up)
+// Fields:
+//   - accountableUid: string
+//   - partnerUid:     string
+//   - status:         string — "pending" | "accepted" | "revoked"
+//   - createdAt:      timestamp
+//   Read: the two parties only. Write: Cloud Function only (clients denied).
+//
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------------
+    // Helper functions
+    // ---------------------------------------------------------------------
+
+    // Signed in at all?
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // The caller owns this user-scoped path.
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // The caller is an *accepted partner* of the given accountable user.
+    // Looks up the deterministic pairing doc. Explicitly excludes self, so the
+    // accountable user can never satisfy "partner" checks on their own data.
+    function acceptedPartnerOf(accountableUid) {
+      let pid = accountableUid + '_' + request.auth.uid;
+      return isAuthenticated()
+        && request.auth.uid != accountableUid
+        && exists(/databases/$(database)/documents/pairings/$(pid))
+        && get(/databases/$(database)/documents/pairings/$(pid)).data.status == 'accepted';
+    }
+
+    // ---------------------------------------------------------------------
+    // Domain validators — called on BOTH create and (where allowed) update
+    // ---------------------------------------------------------------------
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(['displayName', 'createdAt'])
+        && data.keys().hasAll(['displayName', 'createdAt'])
+        && data.displayName is string
+        && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.createdAt is timestamp;
+    }
+
+    function isValidDeviceCreate(data) {
+      return data.keys().hasOnly(['platform', 'armed', 'createdAt', 'fcmToken', 'lastHeartbeatAt'])
+        && data.keys().hasAll(['platform', 'armed', 'createdAt'])
+        && data.platform is string && data.platform.size() >= 1 && data.platform.size() <= 20
+        && data.armed is bool
+        && data.createdAt is timestamp
+        && (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 4096))
+        && (!('lastHeartbeatAt' in data) || data.lastHeartbeatAt is timestamp);
+    }
+
+    function isValidDeviceUpdate() {
+      return request.resource.data.keys().hasOnly(['platform', 'armed', 'createdAt', 'fcmToken', 'lastHeartbeatAt'])
+        && request.resource.data.keys().hasAll(['platform', 'armed', 'createdAt'])
+        // Immutable identity fields:
+        && request.resource.data.platform == resource.data.platform
+        && request.resource.data.createdAt == resource.data.createdAt
+        // Mutable fields, still type-checked:
+        && request.resource.data.armed is bool
+        && (!('fcmToken' in request.resource.data) || (request.resource.data.fcmToken is string && request.resource.data.fcmToken.size() <= 4096))
+        && (!('lastHeartbeatAt' in request.resource.data) || request.resource.data.lastHeartbeatAt is timestamp);
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasOnly(['type', 'at', 'packageName', 'deviceId'])
+        && data.keys().hasAll(['type', 'at'])
+        && data.type in [
+             'lock_armed', 'lock_disarmed', 'block_enforced',
+             'unlock_success', 'unlock_failed', 'usage_access_lost', 'boot_rearm',
+             'device_admin_enabled', 'device_admin_disable_requested', 'device_admin_disabled'
+           ]
+        && data.at is timestamp
+        // Allow backfill from the offline queue (past times) but reject future
+        // dating beyond small clock skew.
+        && data.at <= request.time + duration.value(5, 'm')
+        && (!('packageName' in data) || (data.packageName is string && data.packageName.size() >= 1 && data.packageName.size() <= 255))
+        && (!('deviceId' in data) || (data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 128));
+    }
+
+    function isValidGrant(data) {
+      return data.keys().hasOnly(['action', 'issuedByUid', 'createdAt', 'status', 'expiresAt'])
+        && data.keys().hasAll(['action', 'issuedByUid', 'createdAt', 'status'])
+        && data.action in ['unlock', 'lock']
+        && data.issuedByUid == request.auth.uid          // can't spoof the issuer
+        && data.createdAt is timestamp
+        && data.status == 'active'                        // clients may only create active grants
+        && (
+             (data.action == 'unlock'
+               && data.expiresAt is timestamp
+               && data.expiresAt > request.time
+               && data.expiresAt < request.time + duration.value(30, 'd'))  // sane cap on a timed unlock
+             || (data.action == 'lock' && !('expiresAt' in data))
+           );
+    }
+
+    // ---------------------------------------------------------------------
+    // users/{uid}
+    // ---------------------------------------------------------------------
+    match /users/{uid} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data)
+                       && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;  // account deletion is handled server-side
+
+      // --- devices (owner-only; holds the FCM push credential) ---
+      match /devices/{deviceId} {
+        allow read:   if isOwner(uid);
+        allow create: if isOwner(uid) && isValidDeviceCreate(request.resource.data);
+        allow update: if isOwner(uid) && isValidDeviceUpdate();
+        allow delete: if isOwner(uid);
+      }
+
+      // --- events (append-only accountability log) ---
+      match /events/{eventId} {
+        allow read:          if isOwner(uid) || acceptedPartnerOf(uid);
+        allow create:        if isOwner(uid) && isValidEvent(request.resource.data);
+        allow update, delete: if false;  // immutable audit trail
+      }
+
+      // --- grants (remote unlock/lock; partner-issued) ---
+      match /grants/{grantId} {
+        allow read:          if isOwner(uid) || acceptedPartnerOf(uid);
+        allow create:        if acceptedPartnerOf(uid) && isValidGrant(request.resource.data);
+        allow update, delete: if false;  // expiry is by `expiresAt`; re-lock is a new grant
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // pairings/{pairId}   (pairId == accountableUid + '_' + partnerUid)
+    // ---------------------------------------------------------------------
+    match /pairings/{pairId} {
+      allow read: if isAuthenticated()
+        && (resource.data.accountableUid == request.auth.uid
+            || resource.data.partnerUid == request.auth.uid);
+      allow write: if false;  // established only via a Cloud Function (Admin SDK)
+    }
+
+    // Any path not matched above is denied by Firestore's default-deny.
+  }
+}

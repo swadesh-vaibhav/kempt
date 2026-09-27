@@ -5,6 +5,5 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.kapt) apply false
     alias(libs.plugins.hilt) apply false
-    // Enable once you have a Firebase project + app/google-services.json:
-    // alias(libs.plugins.google.services) apply false
+    alias(libs.plugins.google.services) apply false
 }

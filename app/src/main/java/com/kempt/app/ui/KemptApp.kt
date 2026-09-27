@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief The root composable: owns the shared ViewModel, requests notifications, and gates the start.
+ * @brief The root composable: owns the shared ViewModels, gates on sign-in, then on onboarding.
  */
 package com.kempt.app.ui
 
@@ -21,26 +21,37 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
+import com.kempt.app.auth.AuthState
+import com.kempt.app.auth.AuthViewModel
+import com.kempt.app.ui.auth.SignInScreen
 import com.kempt.app.ui.navigation.Dest
 import com.kempt.app.ui.navigation.KemptNavHost
 
 /**
- * @brief Top of the Compose tree: chooses the start destination and builds the navigation graph.
+ * @brief Top of the Compose tree: gates on authentication, then onboarding, then builds the graph.
  *
- * @details Responsibilities:
- * - **One ViewModel for the whole app.** @c hiltViewModel() is called exactly here, so the instance is
- *   scoped to the hosting Activity and shared by every screen (the installed-app list loads once). It is
- *   passed down into @ref KemptNavHost — never re-fetched inside a nav destination.
- * - **Notification permission.** On Android 13+ (@c TIRAMISU) we request @c POST_NOTIFICATIONS once, so
- *   the foreground-service and accountability notifications can show.
- * - **No wrong-screen flash.** @ref HomeViewModel.onboardingComplete starts as @c null ("not read
- *   yet"); while it's null we render an empty @c Box, then build the @c NavHost with the correct start
- *   once the real value arrives. This avoids briefly showing the wizard to returning users.
+ * @details Two outer gates wrap the app, outermost first:
+ * - **Sign-in.** @ref AuthViewModel.authState starts at @ref AuthState.Loading (brief splash), then
+ *   resolves to @ref AuthState.SignedOut (show @ref SignInScreen) or @ref AuthState.SignedIn (show the
+ *   app). Signing in is what turns the Firestore backend from inert to live — every write needs the uid.
+ * - **Onboarding.** Only once signed in: @ref HomeViewModel.onboardingComplete is @c null until read
+ *   (splash), then picks @ref Dest.Onboarding or @ref Dest.Main. Keeping the start destination in a
+ *   @c remember avoids re-showing the wizard when the flag flips on finish.
+ *
+ * Both ViewModels are obtained here with @c hiltViewModel(), so each is Activity-scoped and shared —
+ * @ref HomeViewModel in particular is passed down into @ref KemptNavHost, never re-fetched per screen.
+ *
+ * Notification permission (Android 13+) is requested once, up front, so service/accountability
+ * notifications can show.
  *
  * @param viewModel The shared home ViewModel (Hilt-provided; defaulted so previews/tests can inject).
+ * @param authViewModel The auth-gate ViewModel (Hilt-provided).
  */
 @Composable
-fun KemptApp(viewModel: HomeViewModel = hiltViewModel()) {
+fun KemptApp(
+    viewModel: HomeViewModel = hiltViewModel(),
+    authViewModel: AuthViewModel = hiltViewModel(),
+) {
     val context = LocalContext.current
 
     val notificationLauncher = rememberLauncherForActivityResult(
@@ -56,23 +67,40 @@ fun KemptApp(viewModel: HomeViewModel = hiltViewModel()) {
         }
     }
 
-    val onboardingComplete by viewModel.onboardingComplete.collectAsStateWithLifecycle()
+    val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
-    when (val done = onboardingComplete) {
-        null -> Box(Modifier.fillMaxSize()) // brief splash while the flag is read from DataStore
-        else -> {
-            val navController = rememberNavController()
-            // Capture the start once. When onboarding finishes, the flag flips false -> true and this
-            // branch recomposes; keeping the start fixed stops NavHost from rebuilding its graph — the
-            // wizard's explicit navigate(main) already moved the user.
-            val startDestination = remember {
-                if (done) Dest.Main.route else Dest.Onboarding.route
+    when (authState) {
+        // Current user not read yet — brief splash, don't flash the sign-in screen.
+        AuthState.Loading -> Box(Modifier.fillMaxSize())
+
+        // No user — prompt sign-in. Success flips authState to SignedIn and this recomposes.
+        AuthState.SignedOut -> SignInScreen(
+            signingIn = authViewModel.signingIn,
+            errorMessage = authViewModel.signInError,
+            onSignInClick = { authViewModel.signIn(context) },
+        )
+
+        // Signed in — fall through to the onboarding/main gate.
+        is AuthState.SignedIn -> {
+            val onboardingComplete by viewModel.onboardingComplete.collectAsStateWithLifecycle()
+
+            when (val done = onboardingComplete) {
+                null -> Box(Modifier.fillMaxSize()) // brief splash while the flag is read from DataStore
+                else -> {
+                    val navController = rememberNavController()
+                    // Capture the start once. When onboarding finishes, the flag flips false -> true and
+                    // this recomposes; keeping the start fixed stops NavHost from rebuilding its graph —
+                    // the wizard's explicit navigate(main) already moved the user.
+                    val startDestination = remember {
+                        if (done) Dest.Main.route else Dest.Onboarding.route
+                    }
+                    KemptNavHost(
+                        navController = navController,
+                        viewModel = viewModel,
+                        startDestination = startDestination,
+                    )
+                }
             }
-            KemptNavHost(
-                navController = navController,
-                viewModel = viewModel,
-                startDestination = startDestination
-            )
         }
     }
 }

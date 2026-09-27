@@ -74,6 +74,11 @@ render.experimental.xml
 # Kotlin
 .kotlin/
 
+# Agent tooling — downloaded skill packages, not app code (Claude Code / Firebase skills)
+.agents/
+.claude/skills/
+skills-lock.json
+
 # OS cruft
 .DS_Store
 Thumbs.db

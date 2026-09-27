@@ -6,12 +6,14 @@ package com.kempt.app.di
 
 import android.content.Context
 import androidx.room.Room
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.kempt.app.data.BlockEventDao
 import com.kempt.app.data.BlockRuleDao
 import com.kempt.app.data.KemptDatabase
 import com.kempt.app.data.LockStateStore
 import com.kempt.app.sync.AccountabilityService
-import com.kempt.app.sync.StubAccountabilityService
+import com.kempt.app.sync.FirestoreAccountabilityService
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -34,13 +36,16 @@ import javax.inject.Singleton
 abstract class AppModule {
 
     /**
-     * @brief Binds the @ref com.kempt.app.sync.AccountabilityService interface to its stub implementation.
+     * @brief Binds the @ref com.kempt.app.sync.AccountabilityService interface to its real
+     * Firestore implementation.
+     * @details Swap this parameter back to @ref com.kempt.app.sync.StubAccountabilityService to run
+     * the local pipelines without a backend (e.g. in tests or offline development).
      * @param impl The concrete implementation Hilt should supply (it knows how to build this).
      * @return The interface type that injection sites request.
      */
     @Binds
     abstract fun bindAccountabilityService(
-        impl: StubAccountabilityService
+        impl: FirestoreAccountabilityService
     ): AccountabilityService
 
     /** @brief Holds the @c @Provides factories for types Hilt cannot construct directly. */
@@ -80,5 +85,24 @@ abstract class AppModule {
         @Singleton
         fun provideLockStateStore(@ApplicationContext context: Context): LockStateStore =
             LockStateStore(context)
+
+        /**
+         * @brief Provides the app-wide Cloud Firestore client.
+         * @details @c getInstance() returns the default @c FirebaseApp's Firestore, which the
+         * google-services plugin auto-initialises from @c app/google-services.json — no manual
+         * setup is needed.
+         * @return The singleton @c FirebaseFirestore.
+         */
+        @Provides
+        @Singleton
+        fun provideFirebaseFirestore(): FirebaseFirestore = FirebaseFirestore.getInstance()
+
+        /**
+         * @brief Provides the app-wide Firebase Auth client (source of the current user's uid).
+         * @return The singleton @c FirebaseAuth.
+         */
+        @Provides
+        @Singleton
+        fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
     }
 }

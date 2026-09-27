@@ -4,8 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.hilt)
-    // Enable after adding app/google-services.json:
-    // alias(libs.plugins.google.services)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -82,8 +81,15 @@ dependencies {
     // Background work (watchdog / periodic sync)
     implementation(libs.androidx.work.runtime.ktx)
 
-    // Push (accountability layer). Needs a Firebase project + google-services plugin to
-    // actually receive messages at runtime; the dependency alone is fine to compile.
+    // Accountability layer. The google-services plugin (applied above) reads
+    // app/google-services.json at build time to point these SDKs at the Firebase project.
     implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.messaging)
+    implementation(libs.firebase.messaging)   // push: partner alerts / unlock signals
+    implementation(libs.firebase.firestore)   // event log + unlock-grant documents
+    implementation(libs.firebase.auth)        // user identity: the uid that scopes all data
+
+    // Google Sign-In via Credential Manager (the modern replacement for GoogleSignInClient)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 }

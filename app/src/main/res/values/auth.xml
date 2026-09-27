@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auth configuration.
+
+  google_web_client_id: the OAuth 2.0 *Web* client ID for this Firebase project
+  (NOT the Android client). Find it after enabling Google sign-in:
+    Firebase console → Authentication → Sign-in method → Google → (expand) Web SDK
+    configuration → "Web client ID",  OR
+    Google Cloud console → APIs & Services → Credentials → "Web client (auto created
+    by Google Service)".
+  It looks like:  1234567890-abc123def456.apps.googleusercontent.com
+  Paste it below (replace the placeholder). Until then, sign-in fails fast with a
+  clear message instead of crashing.
+-->
+<resources>
+    <string name="google_web_client_id" translatable="false">423895631216-k7m03ivd7p91jcf4vliljjornm3onnnl.apps.googleusercontent.com</string>
+</resources>
