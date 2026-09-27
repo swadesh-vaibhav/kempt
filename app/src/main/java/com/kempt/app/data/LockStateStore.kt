@@ -57,6 +57,14 @@ class LockStateStore(context: Context) {
     val hasPasscode: Flow<Boolean> = store.data.map { it[PASS_HASH] != null }
 
     /**
+     * @brief Emits whether the first-run onboarding wizard has been completed.
+     * @details Defaults to @c false (the key is absent) on a fresh install, so the UI shows the
+     * permissions → apps → passcode wizard; once @ref completeOnboarding runs, later launches skip
+     * straight to the main screen.
+     */
+    val onboardingComplete: Flow<Boolean> = store.data.map { it[ONBOARDING_COMPLETE] ?: false }
+
+    /**
      * @brief Reads the armed flag once (a single snapshot rather than an ongoing stream).
      * @details Provided for callers with no long-lived coroutine scope, such as the boot
      * receiver. @c suspend means it must be called from a coroutine and awaits the first
@@ -79,6 +87,15 @@ class LockStateStore(context: Context) {
             it[ARMED] = false
             it.remove(ARMED_SINCE)
         }
+    }
+
+    /**
+     * @brief Marks first-run onboarding as finished so later launches skip the wizard.
+     * @details Called once the user reaches the end of the setup wizard (permissions granted, apps
+     * chosen, passcode set). Idempotent — re-running it just re-writes @c true.
+     */
+    suspend fun completeOnboarding() {
+        store.edit { it[ONBOARDING_COMPLETE] = true }
     }
 
     /**
@@ -125,6 +142,7 @@ class LockStateStore(context: Context) {
         val ARMED_SINCE = longPreferencesKey("armed_since")
         val PASS_SALT = stringPreferencesKey("pass_salt")
         val PASS_HASH = stringPreferencesKey("pass_hash")
+        val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
     }
 }
 

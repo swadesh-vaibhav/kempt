@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -105,6 +106,23 @@ class HomeViewModel @Inject constructor(
      */
     val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
 
+    /**
+     * @brief Startup routing signal driving the first-run wizard vs. the main app.
+     *
+     * @details Deliberately kept out of @ref uiState (whose fields default the instant it is created):
+     * a @c StateFlow&lt;Boolean?&gt; whose initial value is @c null means "DataStore hasn't been read
+     * yet", letting the UI render nothing for that first frame instead of assuming "onboarding not
+     * done" and briefly flashing the wizard on every launch. Once the store emits, the value becomes
+     * @c true (skip to the main screen) or @c false (show the wizard).
+     *
+     * @note @c map&lt;Boolean, Boolean?&gt; widens the element type so the flow can carry the @c null
+     * initial value; @c stateIn turns the cold flow into a hot, cached @c StateFlow.
+     */
+    val onboardingComplete: StateFlow<Boolean?> =
+        lockState.onboardingComplete
+            .map<Boolean, Boolean?> { it }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     /** @brief Kicks off the one-time installed-app load on a background dispatcher when the ViewModel is created. */
     init {
         viewModelScope.launch(Dispatchers.Default) {
@@ -134,6 +152,15 @@ class HomeViewModel @Inject constructor(
                 blockRuleDao.delete(packageName)
             }
         }
+    }
+
+    /**
+     * @brief Persists that first-run onboarding is finished; called from the last wizard step.
+     * @details Flips @ref onboardingComplete to @c true so subsequent launches route straight to the
+     * main screen.
+     */
+    fun completeOnboarding() {
+        viewModelScope.launch { lockState.completeOnboarding() }
     }
 
     /** @brief One-tap lockdown: arm the lock, start the monitor, schedule the heartbeat, and log the event. */
